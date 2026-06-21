@@ -1,0 +1,35 @@
+============================================================
+SEARCH TYPEAHEAD — DEMO LOG
+============================================================
+
+[1] CACHE HIT SPEEDUP (low latency)
+  1st call  -> source: store  latency: 8.094 ms
+  2nd call  -> source: cache  latency: 0.033 ms
+  speedup   -> ~245x faster from cache
+
+[2] CONSISTENT HASHING (prefix -> owner cache node)
+  iphone   -> cache-node-2  (MISS)
+  samsung  -> cache-node-2  (MISS)
+  laptop   -> cache-node-1  (MISS)
+  java     -> cache-node-2  (MISS)
+  python   -> cache-node-2  (MISS)
+  tv       -> cache-node-1  (MISS)
+
+[3] BASIC vs RECENCY RANKING for prefix 'iphone'
+    (searching 'iphone 15' several times to make it recently active)
+  BASIC   top 5: iphone gaming, iphone plus, iphone wireless, iphone bundle, iphone for sale
+  RECENCY top 5: iphone 15, iphone gaming, iphone plus, iphone wireless, iphone bundle
+  -> 'iphone 15' is low by all-time count but jumps up under recency,
+     then fades back as its recent score decays over time.
+
+[4] BATCH WRITES REDUCE DB WRITES
+  submitting 50 searches (many repeated)...
+  searches submitted : 50
+  actual DB writes   : 2
+  write reduction    : 94.8%  (fewer writes = less load)
+
+[STATS SNAPSHOT]
+  cache hit rate : 25%
+  latency p50/p95/p99 : 8.094/8.439/8.439 ms
+  total DB writes : 3
+============================================================

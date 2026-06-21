@@ -161,7 +161,11 @@ Measured locally via `/stats` (numbers vary per run):
 - **Consistent hashing:** `/cache/debug` shows prefixes spread across all 3 nodes,
   e.g. `iph→node-2`, `sams→node-0`, `lap→node-1`.
 
-Reproduce:
+**One-command proof:** with the server running, `npm run demo` exercises all of the
+above and writes a log to [`demo-output.log`](demo-output.log) — cache speedup,
+consistent-hashing routing, basic-vs-recency ranking, and batch write reduction.
+
+Reproduce manually:
 ```bash
 # cache speedup
 curl "localhost:4000/suggest?q=iphone"   # source: store (slow)
