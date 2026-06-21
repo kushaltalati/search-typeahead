@@ -10,40 +10,37 @@ no Redis, no build tools — everything runs in-process for a simple, self-conta
 
 ### Diagram
 
-```
-                          ┌─────────────────────────────────────────────┐
-                          │              Browser (public/index.html)      │
-                          │  search box · debounced typeahead · trending  │
-                          └───────────────┬───────────────────────────────┘
-                                          │ HTTP (JSON)
-        GET /suggest?q=&rank=   POST /search   GET /trending   GET /cache/debug   GET /stats
-                                          │
-                          ┌───────────────▼───────────────────────────────┐
-                          │          Express server (server.js)            │
-                          │                                                │
-   /suggest ─────────────▶│   ┌──────────────────────────┐                │
-                          │   │   DISTRIBUTED CACHE        │                │
-                          │   │   3 nodes, consistent hash │── HIT ────────▶│ return list
-                          │   └────────────┬─────────────┘                 │
-                          │            MISS │                              │
-                          │   ┌────────────▼─────────────┐                 │
-                          │   │   PRIMARY STORE (Map)     │── compute top10 │ + cache it
-                          │   │   query -> { count }      │                 │
-                          │   └────────────▲─────────────┘                 │
-                          │                │ flush (batched)               │
-   /search ──────────────▶│   ┌────────────┴─────────────┐                 │
-                          │   │   BATCH BUFFER            │                 │
-                          │   │   aggregate + flush        │                │
-                          │   │   (every 2s OR 50 items)   │── also updates ─┼─▶ recent-activity
-                          │   └──────────────────────────┘   + invalidates  │    (trending +
-                          │                                   affected cache │     recency)
-   /trending ────────────▶│   recent-activity scores (time-decayed)         │
-   /cache/debug ─────────▶│   which node owns a prefix + HIT/MISS            │
-   /stats ───────────────▶│   hit rate · latency p50/p95/p99 · write counts │
-                          └─────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Browser["Browser — public/index.html"]
+        UI["Search box · debounced typeahead · trending · live stats"]
+    end
+
+    subgraph Server["Express server — server.js (PORT 4000)"]
+        direction TB
+        CACHE["DISTRIBUTED CACHE<br/>3 nodes · consistent hashing (FNV-1a ring, 50 vnodes/node)<br/>top-10 list per prefix · 30s TTL"]
+        STORE["PRIMARY STORE (Map)<br/>query → { count }<br/>treated as the database"]
+        BUFFER["BATCH BUFFER<br/>aggregate duplicates<br/>flush on 50 items OR 2s timer"]
+        RECENT["RECENT-ACTIVITY (Map)<br/>time-decayed score (half-life 60s)<br/>powers trending + recency ranking"]
+        METRICS["METRICS → /stats<br/>hit rate · write reduction · latency p50/p95/p99"]
+    end
+
+    UI -- "GET /suggest?q=&rank=" --> CACHE
+    CACHE -- "HIT" --> UI
+    CACHE -- "MISS: scan + sort top-10, then cache" --> STORE
+    STORE -- "computed list" --> CACHE
+
+    UI -- "POST /search" --> BUFFER
+    BUFFER -- "flush: +count" --> STORE
+    BUFFER -- "flush: bump" --> RECENT
+    BUFFER -- "flush: invalidate affected prefixes" --> CACHE
+
+    UI -- "GET /trending" --> RECENT
+    UI -- "GET /cache/debug" --> CACHE
+    UI -- "GET /stats" --> METRICS
 ```
 
-### Explanation of each component
+### Component responsibilities
 
 | Component | In code | Responsibility |
 |---|---|---|
@@ -73,7 +70,8 @@ recent-activity score is bumped, and affected cached prefixes are invalidated.
 - **Format:** `data.json` = `[{ "query": "iphone 15", "count": 85000 }, ...]`
 - **How counts are derived:** queries are built from brand / product / topic + modifier
   combinations; counts follow a Zipf-like distribution (shorter, head terms are more
-  popular) plus seeded noise. The RNG is seeded, so the dataset is identical on every run.
+  popular) plus seeded noise. The RNG is seeded (`seed = 42`), so the dataset is identical
+  on every run.
 
 **Loading instructions:**
 
@@ -100,7 +98,7 @@ Returns up to 10 prefix-matching suggestions. `rank` defaults to `recency`.
 {
   "prefix": "iphone", "rank": "basic", "source": "cache",
   "node": "cache-node-2", "latencyMs": 0.03,
-  "suggestions": [ { "query": "iphone gaming", "count": 98297 }, ... ]
+  "suggestions": [ { "query": "iphone gaming", "count": 98297 } ]
 }
 ```
 - `source`: `cache` (hit) or `store` (computed). `node`: owning cache node.
@@ -117,7 +115,7 @@ Records a search (queued for batched write) and returns the dummy response.
 ### `GET /trending`
 Top queries by recent (time-decayed) activity.
 ```json
-{ "trending": [ { "query": "java tutorial", "recentScore": 22.38 }, ... ] }
+{ "trending": [ { "query": "java tutorial", "recentScore": 22.38 } ] }
 ```
 
 ### `GET /cache/debug?prefix=<p>&rank=basic|recency`
@@ -125,18 +123,18 @@ Shows which cache node owns the prefix and whether it is cached.
 ```json
 { "prefix": "iphone", "rank": "recency", "ownerNode": "cache-node-2",
   "status": "HIT", "expiresInMs": 29911,
-  "ring": [ { "node": "cache-node-0", "cachedKeys": 0 }, ... ] }
+  "ring": [ { "node": "cache-node-0", "cachedKeys": 0 } ] }
 ```
 
 ### `GET /stats`
 Performance numbers used in the report below.
 ```json
 {
-  "cache": { "hits": 3, "misses": 3, "hitRatePct": 50, "nodes": [...] },
-  "batchWrites": { "searchesReceived": 61, "dbWriteOps": 33, "flushCount": 2,
-                   "pendingInBuffer": 0, "writeReductionPct": 45.9 },
-  "db": { "reads": 3, "writes": 33, "storeSize": 110000 },
-  "suggestLatencyMs": { "samples": 7, "p50": 0.04, "p95": 7.97, "p99": 7.97 }
+  "cache": { "hits": 9, "misses": 34, "hitRatePct": 20.9, "nodes": [] },
+  "batchWrites": { "searchesReceived": 62, "dbWriteOps": 7, "flushCount": 6,
+                   "pendingInBuffer": 0, "writeReductionPct": 88.7 },
+  "db": { "reads": 34, "writes": 7, "storeSize": 110001 },
+  "suggestLatencyMs": { "samples": 43, "p50": 3.788, "p95": 9.95, "p99": 13.755 }
 }
 ```
 
@@ -151,7 +149,7 @@ DB engine. The Map gives a clean place to count reads/writes and prove the batch
 
 **Prefix lookup = linear scan, then cache.**
 A scan of 110k entries takes only single-digit milliseconds, and the cache makes repeat
-prefixes effectively free (~0.03 ms). *Trade-off:* cold lookups are O(n); a trie would
+prefixes effectively free (~0.01 ms). *Trade-off:* cold lookups are O(n); a trie would
 make them O(prefix length) but adds significant code. At this scale, cache-in-front is
 the better simplicity/latency deal.
 
@@ -170,7 +168,7 @@ more recompute.
 **Recency-aware ranking.** `score = count + WEIGHT × recentScore`, where `recentScore` is
 a time-decayed sum of recent searches (half-life 60 s). *Why decay:* it prevents a query
 that was hot for a short burst from staying on top forever — as activity stops, the boost
-fades back to base popularity. Same `/suggest` API serves both modes via `rank=`.
+fades back to base popularity. The same `/suggest` API serves both modes via `rank=`.
 
 **Batch writes.** Submissions go into a buffer, duplicates are aggregated, and the buffer
 flushes on size (50) or timer (2 s). *Benefit:* far fewer store writes (see §5).
@@ -183,22 +181,22 @@ log/queue would fix it at the cost of complexity.
 ## 5. Performance Report
 
 Measured locally via `/stats` and the bundled demo (`npm run demo` → `demo-output.log`).
-Representative run:
+Representative run on this machine (110,000-query dataset):
 
 | Metric | Result |
 |---|---|
-| **Suggestion latency — cold (store)** | ~8.1 ms |
-| **Suggestion latency — warm (cache)** | ~0.033 ms |
-| **Cache speedup** | **~245×** faster on a hit |
-| **Latency p50 / p95 / p99** | 8.09 / 8.44 / 8.44 ms (cold-dominated sample) |
-| **Cache hit rate** | rises with repeated prefixes (50%+ in mixed traffic) |
-| **Batch write reduction** | 50 repeated searches → **2 DB writes (94.8% fewer)** |
-| **Earlier mixed test** | 61 searches → 33 writes (45.9% fewer) |
+| **Suggestion latency — cold (store)** | ~3.55 ms |
+| **Suggestion latency — warm (cache)** | ~0.007 ms |
+| **Cache speedup** | **~500×** faster on a hit |
+| **Latency p50 / p95 / p99** | 3.79 / 9.95 / 13.76 ms (cold-dominated sample) |
+| **Cache hit rate** | 20.9% in the demo's mostly-unique traffic; rises sharply with repeated prefixes |
+| **Batch write reduction** | 50 repeated searches → **2 DB writes (88.7% fewer)** |
+| **Overall this run** | 62 searches → 7 DB writes (88.7% fewer) |
 | **Consistent hashing** | prefixes spread across all 3 nodes (e.g. `laptop→node-1`, `iphone→node-2`) |
 
 **Ranking demonstration (basic vs recency):** after searching `iphone 15` a few times,
 the prefix `iphone` returns:
-- `BASIC`  top: iphone gaming, iphone plus, iphone wireless, iphone bundle, iphone for sale
+- `BASIC`   top: iphone gaming, iphone plus, iphone wireless, iphone bundle, iphone for sale
 - `RECENCY` top: **iphone 15**, iphone gaming, iphone plus, iphone wireless, iphone bundle
 
 `iphone 15` is low by all-time count but jumps to #1 under recency, then fades as its

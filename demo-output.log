@@ -3,9 +3,9 @@ SEARCH TYPEAHEAD — DEMO LOG
 ============================================================
 
 [1] CACHE HIT SPEEDUP (low latency)
-  1st call  -> source: store  latency: 8.094 ms
-  2nd call  -> source: cache  latency: 0.033 ms
-  speedup   -> ~245x faster from cache
+  1st call  -> source: store  latency: 3.551 ms
+  2nd call  -> source: cache  latency: 0.007 ms
+  speedup   -> ~507x faster from cache
 
 [2] CONSISTENT HASHING (prefix -> owner cache node)
   iphone   -> cache-node-2  (MISS)
@@ -26,10 +26,10 @@ SEARCH TYPEAHEAD — DEMO LOG
   submitting 50 searches (many repeated)...
   searches submitted : 50
   actual DB writes   : 2
-  write reduction    : 94.8%  (fewer writes = less load)
+  write reduction    : 88.7%  (fewer writes = less load)
 
 [STATS SNAPSHOT]
-  cache hit rate : 25%
-  latency p50/p95/p99 : 8.094/8.439/8.439 ms
-  total DB writes : 3
+  cache hit rate : 20.9%
+  latency p50/p95/p99 : 3.788/9.95/13.755 ms
+  total DB writes : 7
 ============================================================
