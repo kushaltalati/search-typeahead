@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Search Typeahead</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --accent: #38bdf8;
+      --accent-2: #2c5f7c;
+      --bg: #0b1220;
+      --panel: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --text: #e8edf5;
+      --muted: #93a1b5;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      min-height: 100vh;
+      background:
+        radial-gradient(1100px 600px at 15% -10%, rgba(56,189,248,0.18), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(99,102,241,0.16), transparent 55%),
+        var(--bg);
+      display: flex; justify-content: center; padding: 72px 20px 60px;
+    }
+    .app { width: 100%; max-width: 680px; }
+
+    header { text-align: center; margin-bottom: 28px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--accent);
+      background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.25);
+      padding: 5px 12px; border-radius: 999px; margin-bottom: 16px; letter-spacing: .02em;
+    }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
+    h1 .grad { background: linear-gradient(90deg, var(--accent), #818cf8); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .tagline { color: var(--muted); font-size: 14px; margin-top: 8px; }
+
+    /* search */
+    .search-wrap { position: relative; }
+    .search-box {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      border-radius: 14px; padding: 4px 4px 4px 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .search-box:focus-within { border-color: rgba(56,189,248,0.6); box-shadow: 0 0 0 4px rgba(56,189,248,0.12), 0 10px 40px rgba(0,0,0,0.35); }
+    .search-box svg.icon { width: 20px; height: 20px; color: var(--muted); flex: none; }
+    #q {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: var(--text); font-size: 16px; padding: 14px 0; font-family: inherit;
+    }
+    #q::placeholder { color: var(--muted); }
+    #go {
+      border: none; cursor: pointer; font-family: inherit; font-weight: 600; font-size: 14px;
+      color: #04121f; background: linear-gradient(90deg, var(--accent), #60a5fa);
+      padding: 12px 22px; border-radius: 11px; transition: filter .2s, transform .05s;
+    }
+    #go:hover { filter: brightness(1.08); }
+    #go:active { transform: translateY(1px); }
+
+    /* dropdown */
+    #dropdown {
+      position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 20;
+      background: #0f1828; border: 1px solid var(--border); border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; display: none;
+    }
+    .item {
+      display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .item:last-child { border-bottom: none; }
+    .item:hover, .item.active { background: rgba(56,189,248,0.10); }
+    .item .rank { width: 20px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+    .item .q { flex: 1; font-size: 15px; }
+    .item .q b { color: var(--accent); font-weight: 600; }
+    .item .count {
+      color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
+      background: rgba(255,255,255,0.05); padding: 3px 9px; border-radius: 999px;
+    }
+
+    /* controls row */
+    .controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+    .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; }
+    .switch input { display: none; }
+    .track { width: 38px; height: 22px; border-radius: 999px; background: rgba(255,255,255,0.12); position: relative; transition: background .2s; flex: none; }
+    .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .2s; }
+    .switch input:checked + .track { background: var(--accent); }
+    .switch input:checked + .track::after { transform: translateX(16px); }
+
+    .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-height: 22px; }
+    .tag { font-size: 11px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); padding: 3px 9px; border-radius: 999px; }
+    .tag.hit { color: #34d399; border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+    .tag.store { color: #fbbf24; border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.08); }
+
+    #response {
+      margin-top: 16px; padding: 14px 16px; border-radius: 12px; display: none;
+      background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.25);
+      font-size: 14px; font-family: ui-monospace, Menlo, monospace; color: #d1fae5;
+    }
+
+    .panel { margin-top: 30px; }
+    .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+    #trending { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; transition: all .15s;
+    }
+    .chip:hover { border-color: rgba(56,189,248,0.5); background: rgba(56,189,248,0.08); }
+    .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .chip.empty { color: var(--muted); cursor: default; border-style: dashed; }
+    .chip.empty:hover { border-color: var(--border); background: var(--panel); }
+
+    /* stats strip */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 30px; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
+    .stat .val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    @media (max-width: 560px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <span class="badge">● Live · 110k queries indexed</span>
+      <h1>🔎 <span class="grad">Search Typeahead</span></h1>
+      <p class="tagline">Start typing — suggestions ranked by popularity &amp; recency, served from a distributed cache.</p>
+    </header>
+
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input id="q" type="text" placeholder="Try “iphone”, “java tutorial”, “laptop”…" autocomplete="off" autofocus />
+        <button id="go">Search</button>
+      </div>
+      <div id="dropdown"></div>
+    </div>
+
+    <div class="controls">
+      <label class="switch">
+        <input type="checkbox" id="rankMode" checked />
+        <span class="track"></span>
+        <span>Recency-aware ranking</span>
+      </label>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div id="response"></div>
+
+    <div class="panel">
+      <h2>🔥 Trending searches</h2>
+      <div id="trending"></div>
+    </div>
+
+    <div class="stats" id="stats">
+      <div class="stat"><div class="val" id="st-hit">—</div><div class="lbl">Cache hit rate</div></div>
+      <div class="stat"><div class="val" id="st-p95">—</div><div class="lbl">p95 latency</div></div>
+      <div class="stat"><div class="val" id="st-red">—</div><div class="lbl">Write reduction</div></div>
+      <div class="stat"><div class="val" id="st-db">—</div><div class="lbl">DB writes</div></div>
+    </div>
+  </div>
+
+<script>
+const qInput = document.getElementById("q");
+const dropdown = document.getElementById("dropdown");
+const meta = document.getElementById("meta");
+const responseBox = document.getElementById("response");
+const rankMode = document.getElementById("rankMode");
+
+let activeIndex = -1;
+let current = [];
+let debounceTimer = null;
+
+function rankParam() { return rankMode.checked ? "recency" : "basic"; }
+
+// --- Debounced suggestion fetching (avoids a backend call per keystroke) ---
+qInput.addEventListener("input", () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(fetchSuggestions, 180);
+});
+
+async function fetchSuggestions() {
+  const q = qInput.value.trim();
+  if (!q) { hideDropdown(); meta.innerHTML = ""; return; }
+  meta.innerHTML = `<span class="tag">Loading…</span>`;
+  try {
+    const r = await fetch(`/suggest?q=${encodeURIComponent(q)}&rank=${rankParam()}`);
+    const data = await r.json();
+    current = data.suggestions || [];
+    renderDropdown(q);
+    if (current.length) {
+      const srcClass = data.source === "cache" ? "hit" : "store";
+      meta.innerHTML =
+        `<span class="tag">${current.length} results</span>` +
+        `<span class="tag ${srcClass}">source: ${data.source}</span>` +
+        `<span class="tag">${data.node}</span>` +
+        `<span class="tag">${data.latencyMs} ms</span>`;
+    } else {
+      meta.innerHTML = `<span class="tag">No matches</span>`;
+    }
+  } catch (e) {
+    meta.innerHTML = `<span class="tag store">Error fetching suggestions</span>`;
+    hideDropdown();
+  }
+  loadStats();
+}
+
+function highlight(text, prefix) {
+  const safe = escapeHtml(text);
+  if (text.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return `<b>${safe.slice(0, prefix.length)}</b>${safe.slice(prefix.length)}`;
+  }
+  return safe;
+}
+
+function renderDropdown(prefix) {
+  activeIndex = -1;
+  if (!current.length) { hideDropdown(); return; }
+  dropdown.innerHTML = current.map((s, i) =>
+    `<div class="item" data-i="${i}">
+       <span class="rank">${i + 1}</span>
+       <span class="q">${highlight(s.query, prefix)}</span>
+       <span class="count">${s.count.toLocaleString()}</span>
+     </div>`).join("");
+  dropdown.style.display = "block";
+  dropdown.querySelectorAll(".item").forEach((el) => {
+    el.addEventListener("click", () => submit(current[+el.dataset.i].query));
+  });
+}
+function hideDropdown() { dropdown.style.display = "none"; current = []; activeIndex = -1; }
+
+// --- Keyboard navigation ---
+qInput.addEventListener("keydown", (e) => {
+  const items = dropdown.querySelectorAll(".item");
+  if (e.key === "ArrowDown") { e.preventDefault(); move(1, items); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); move(-1, items); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    if (activeIndex >= 0 && current[activeIndex]) submit(current[activeIndex].query);
+    else submit(qInput.value);
+  } else if (e.key === "Escape") hideDropdown();
+});
+function move(dir, items) {
+  if (!items.length) return;
+  items.forEach((el) => el.classList.remove("active"));
+  activeIndex = (activeIndex + dir + items.length) % items.length;
+  items[activeIndex].classList.add("active");
+  qInput.value = current[activeIndex].query;
+}
+
+document.getElementById("go").addEventListener("click", () => submit(qInput.value));
+
+// --- Submit search (dummy API + count update) ---
+async function submit(query) {
+  query = (query || "").trim();
+  if (!query) return;
+  qInput.value = query;
+  hideDropdown();
+  try {
+    const r = await fetch("/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    const data = await r.json();
+    responseBox.style.display = "block";
+    responseBox.textContent = "← " + JSON.stringify(data);
+    setTimeout(() => { loadTrending(); loadStats(); }, 300); // give the batch a moment to flush
+  } catch (e) {
+    responseBox.style.display = "block";
+    responseBox.textContent = "Error submitting search";
+  }
+}
+
+// --- Trending ---
+async function loadTrending() {
+  try {
+    const r = await fetch("/trending");
+    const data = await r.json();
+    const el = document.getElementById("trending");
+    if (!data.trending.length) {
+      el.innerHTML = `<span class="chip empty">No activity yet — submit a search</span>`;
+      return;
+    }
+    el.innerHTML = data.trending
+      .map((t) => `<span class="chip" data-q="${escapeHtml(t.query)}"><span class="dot"></span>${escapeHtml(t.query)}</span>`)
+      .join("");
+    el.querySelectorAll(".chip").forEach((c) =>
+      c.addEventListener("click", () => { submit(c.dataset.q); }));
+  } catch (e) { /* ignore */ }
+}
+
+// --- Live stats strip ---
+async function loadStats() {
+  try {
+    const r = await fetch("/stats");
+    const d = await r.json();
+    document.getElementById("st-hit").textContent = d.cache.hitRatePct + "%";
+    document.getElementById("st-p95").textContent = d.suggestLatencyMs.p95 + " ms";
+    document.getElementById("st-red").textContent = d.batchWrites.writeReductionPct + "%";
+    document.getElementById("st-db").textContent = d.db.writes.toLocaleString();
+  } catch (e) { /* ignore */ }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (m) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+
+rankMode.addEventListener("change", fetchSuggestions);
+loadTrending();
+loadStats();
+setInterval(loadTrending, 5000);
+setInterval(loadStats, 5000);
+</script>
+</body>
+</html>
